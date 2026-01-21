@@ -42,8 +42,8 @@ Only follow these steps if you want to modify the code or build the app yourself
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/YOUR_USERNAME/the-terminal.git
-cd the-terminal
+git clone https://github.com/Enkabob/the-terminal.git
+cd Terminus-Dashboard-for-Start.gg-Events
 ```
 
 ### 2. Install Dependencies
@@ -83,4 +83,5 @@ To prevent the dashboard from getting cluttered with "TBD vs TBD" matches, this 
 ## 📄 License
 
 MIT License. Hack away.
+
 ```
