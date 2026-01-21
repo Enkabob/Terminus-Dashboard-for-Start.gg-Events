@@ -11,7 +11,7 @@
 
 You do **not** need to install code to use this. Just download the app:
 
-1.  **[Click here to go to the Releases Page](https://github.com/enkabob64g/the-terminal/releases/latest)**.
+1.  **[Click here to go to the Releases Page](https://github.com/enkabob/Terminus-Dashboard-for-Start.gg-Events/releases/latest)**.
 2.  Download the latest **`.exe`** file (e.g., `The.Terminal.Setup.1.0.0.exe`).
 3.  Run the installer.
 4.  Launch the app from your Desktop!
