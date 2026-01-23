@@ -10,7 +10,7 @@ export default function MapEditor({ initialConfig, onSave, onCancel }) {
     bgScale: 1,
     bgOpacity: 0.4,
     stationScale: 1,
-    stationFontSize: 12, // NEW: Global font size
+    stationFontSize: 12,
     width: 800,
     height: 600
   });
@@ -23,20 +23,23 @@ export default function MapEditor({ initialConfig, onSave, onCancel }) {
   const addStation = () => {
     const existingIds = config.stations.map(s => parseInt(s.id));
     const nextId = existingIds.length > 0 ? Math.max(...existingIds) + 1 : 1;
+    const newId = String(nextId);
+    
     setConfig(prev => ({
       ...prev,
-      stations: [...prev.stations, { id: String(nextId), x: prev.width / 2, y: prev.height / 2, shape: 'diamond', rotation: 0 }]
+      stations: [...prev.stations, { id: newId, x: prev.width / 2, y: prev.height / 2, shape: 'diamond', rotation: 0 }]
     }));
+    setSelectedId(newId); // Auto-select new item
   };
 
+  // UPDATED: No prompt. Adds default text, user edits in sidebar.
   const addLabel = () => {
-    const text = prompt("Enter Label Text:", "POOL A");
-    if (!text) return;
-    // Added default opacity: 1
+    const newId = `lbl-${Date.now()}`;
     setConfig(prev => ({
       ...prev,
-      labels: [...prev.labels, { id: `lbl-${Date.now()}`, text, x: prev.width / 2, y: prev.height / 2, size: 24, color: '#FFC300', opacity: 1 }]
+      labels: [...prev.labels, { id: newId, text: "TEXT_LABEL", x: prev.width / 2, y: prev.height / 2, size: 24, color: '#FFC300', opacity: 1 }]
     }));
+    setSelectedId(newId); // Auto-select new item
   };
 
   const handleBgUpload = (e) => {
@@ -194,7 +197,6 @@ export default function MapEditor({ initialConfig, onSave, onCancel }) {
                         {selectedId === st.id && <circle r="30" fill="none" stroke="#FFF" strokeDasharray="4 2" className="animate-spin-slow" vectorEffect="non-scaling-stroke" />}
                         {st.shape === 'diamond' && <path d="M0 20 L30 0 L60 20 L30 40 Z" fill="#000080" stroke={selectedId === st.id ? "#FFF" : "#87CEEB"} strokeWidth="2" transform="translate(-30, -20)" />}
                         {st.shape === 'cube' && <rect x="-20" y="-20" width="40" height="40" fill="#4C1D95" stroke={selectedId === st.id ? "#FFF" : "#A78BFA"} strokeWidth="2" />}
-                        {/* Apply GLOBAL FONT SIZE */}
                         <text y="5" textAnchor="middle" fill="white" fontSize={config.stationFontSize || 12} className="font-bold pointer-events-none select-none" transform={`rotate(${-st.rotation})`}>{st.id}</text>
                     </g>
                 ))}
@@ -220,7 +222,6 @@ export default function MapEditor({ initialConfig, onSave, onCancel }) {
                     <label className="text-[10px] text-gray-400">Station Icon Scale</label>
                     <input type="range" min="0.5" max="3" step="0.1" value={config.stationScale || 1} onChange={(e) => updateGlobal('stationScale', parseFloat(e.target.value))} className="w-full accent-[--color-gold]" />
                 </div>
-                {/* NEW: FONT SIZE SLIDER */}
                 <div className="flex flex-col gap-1">
                     <label className="text-[10px] text-gray-400">Station Font Size</label>
                     <input type="range" min="8" max="32" value={config.stationFontSize || 12} onChange={(e) => updateGlobal('stationFontSize', parseInt(e.target.value))} className="w-full accent-[--color-gold]" />
@@ -266,18 +267,8 @@ export default function MapEditor({ initialConfig, onSave, onCancel }) {
                     <div className="flex flex-col gap-1">
                          <label className="text-[10px] text-[--color-sky] tracking-widest uppercase">Shape Type</label>
                          <div className="flex gap-2">
-                            <button 
-                                onClick={() => updateItem(selectedId, 'station', { shape: 'diamond' })} 
-                                className={`p-2 flex-1 text-xs font-bold border transition ${selectedStation.shape === 'diamond' ? 'bg-[--color-gold] text-gray-800 border-[--color-gold]' : 'bg-gray-800 border-gray-600 text-gray-300 hover:border-white'}`}
-                            >
-                                NORMAL
-                            </button>
-                            <button 
-                                onClick={() => updateItem(selectedId, 'station', { shape: 'cube' })} 
-                                className={`p-2 flex-1 text-xs font-bold border transition ${selectedStation.shape === 'cube' ? 'bg-[--color-gold] text-gray-800 border-[--color-gold]' : 'bg-gray-800 border-gray-600 text-gray-300 hover:border-white'}`}
-                            >
-                                STREAM
-                            </button>
+                            <button onClick={() => updateItem(selectedId, 'station', { shape: 'diamond' })} className={`p-2 flex-1 text-xs font-bold border transition ${selectedStation.shape === 'diamond' ? 'bg-[--color-gold] text-gray-800 border-[--color-gold]' : 'bg-gray-800 border-gray-600 text-gray-300 hover:border-white'}`}>NORMAL</button>
+                            <button onClick={() => updateItem(selectedId, 'station', { shape: 'cube' })} className={`p-2 flex-1 text-xs font-bold border transition ${selectedStation.shape === 'cube' ? 'bg-[--color-gold] text-gray-800 border-[--color-gold]' : 'bg-gray-800 border-gray-600 text-gray-300 hover:border-white'}`}>STREAM</button>
                          </div>
                     </div>
                 </>
@@ -294,7 +285,6 @@ export default function MapEditor({ initialConfig, onSave, onCancel }) {
                         <label className="text-[10px] text-[--color-sky] tracking-widest uppercase">Font Size</label>
                         <input type="range" min="12" max="64" value={selectedLabel.size} onChange={(e) => updateItem(selectedId, 'label', { size: parseInt(e.target.value) })} className="w-full accent-[--color-gold]" />
                     </div>
-                    {/* NEW: LABEL OPACITY */}
                     <div className="flex flex-col gap-1">
                         <label className="text-[10px] text-[--color-sky] tracking-widest uppercase">Opacity</label>
                         <input type="range" min="0.1" max="1" step="0.1" value={selectedLabel.opacity || 1} onChange={(e) => updateItem(selectedId, 'label', { opacity: parseFloat(e.target.value) })} className="w-full accent-[--color-gold]" />
@@ -316,3 +306,4 @@ export default function MapEditor({ initialConfig, onSave, onCancel }) {
     </div>
   );
 }
+
