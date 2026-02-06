@@ -3,7 +3,7 @@ import MapEditor from './MapEditor';
 
 // QUERY
 const DASHBOARD_QUERY = `
-query GetTournamentData($eventId: ID!) {
+query GetTournamentData($eventId: ID!, $page: Int!, $perPage: Int!) {
   event(id: $eventId) {
     name
     tournament {
@@ -13,10 +13,9 @@ query GetTournamentData($eventId: ID!) {
         type
       }
     }
-    # FETCH 1: Active & Upcoming Matches (Sorted by Priority)
-    activeSets: sets(
-      page: 1
-      perPage: 300
+    sets(
+      page: $page
+      perPage: $perPage
       sortType: CALL_ORDER
       filters: { state: [1, 2, 4, 5, 6] }
     ) {
@@ -45,23 +44,6 @@ query GetTournamentData($eventId: ID!) {
         }
       }
     }
-    # FETCH 2: Recently Completed Matches (Sorted by Time Finished)
-    # We need these to resolve "Winner of [Names]"
-    completedSets: sets(
-      page: 1
-      perPage: 100
-      sortType: RECENT
-      filters: { state: [3] }
-    ) {
-      nodes {
-        id
-        slots {
-          entrant {
-            name
-          }
-        }
-      }
-    }
   }
 }
 `;
@@ -71,15 +53,12 @@ const MatchTimer = ({ startedAt }) => {
   const [duration, setDuration] = useState("00:00");
 
   useEffect(() => {
-    if (!startedAt) {
-        setDuration("00:00");
-        return;
-    }
+    if (!startedAt) { setDuration("00:00"); return; }
     
     const update = () => {
       const start = new Date(startedAt * 1000);
       const now = new Date();
-      const diff = Math.floor((now - start) / 1000); // seconds
+      const diff = Math.floor((now - start) / 1000);
       
       if (diff < 0) { setDuration("00:00"); return; }
 
@@ -187,16 +166,12 @@ const VenueMap = ({ playingStations, calledStations, mapConfig }) => {
             {mapConfig.stations.map((st) => {
                 const isPlaying = playingStations.includes(st.id);
                 const isCalled = calledStations.includes(st.id);
-                
                 let fillColor = "#000080";
                 let strokeColor = "#87CEEB";
                 let glowColor = null;
-
                 if (isPlaying) { fillColor = "#DC2626"; strokeColor = "#FECACA"; glowColor = "#EF4444"; } 
                 else if (isCalled) { fillColor = "#FFC300"; strokeColor = "#FFF"; glowColor = "#FFC300"; }
-                
                 const op = isPlaying || isCalled ? 1 : 0.4;
-
                 return (
                     <g key={st.id} transform={`translate(${st.x}, ${st.y}) rotate(${st.rotation}) scale(${mapConfig.stationScale || 1})`}>
                         {st.shape === 'diamond' && (<path d="M0 20 L30 0 L60 20 L30 40 Z" fill={fillColor} fillOpacity={op} stroke={strokeColor} strokeWidth="2" transform="translate(-30, -20)" />)}
@@ -207,7 +182,7 @@ const VenueMap = ({ playingStations, calledStations, mapConfig }) => {
                 );
             })}
             {mapConfig.labels.map(lbl => (
-                <text key={lbl.id} x={lbl.x} y={lbl.y} fontSize={lbl.size} fill={lbl.color || "#FFC300"} opacity={lbl.opacity || 1} textAnchor="middle" className="font-bold shadow-black drop-shadow-md">{lbl.text}</text>
+                <text key={lbl.id} x={lbl.x} y={lbl.y} fontSize={lbl.size} fill={lbl.color || "#FFC300"} opacity={lbl.opacity || 1} textAnchor="middle" className="font-bold opacity-80 shadow-black drop-shadow-md">{lbl.text}</text>
             ))}
         </svg>
       </div>
@@ -236,7 +211,7 @@ export default function TerminalDashboard({ token, eventId, onBack }) {
     setIsEditingMap(false);
   };
 
- const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       const response = await fetch('https://api.start.gg/gql/alpha', {
@@ -244,7 +219,7 @@ export default function TerminalDashboard({ token, eventId, onBack }) {
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({
           query: DASHBOARD_QUERY,
-          variables: { eventId: eventId } // Note: page/perPage are now hardcoded in query for aliases
+          variables: { eventId: eventId, page: 1, perPage: 150 } 
         }),
       });
       const json = await response.json();
@@ -260,76 +235,39 @@ export default function TerminalDashboard({ token, eventId, onBack }) {
           logo: logoObj ? logoObj.url : null
         });
 
-        // 1. MERGE LISTS FOR LOOKUP
-        // We combine Active sets (to display) and Recent sets (to resolve names)
-        const activeNodes = eventData.activeSets.nodes || [];
-        const completedNodes = eventData.completedSets.nodes || [];
-        
+        const rawNodes = eventData.sets.nodes || [];
         const setMap = new Map();
-        
-        // Add Completed sets first (Source of Truth for names)
-        completedNodes.forEach(set => setMap.set(String(set.id), set));
-        // Add Active sets (Source of Truth for current status)
-        activeNodes.forEach(set => setMap.set(String(set.id), set));
+        rawNodes.forEach(set => setMap.set(set.id, set));
 
-        // --- HELPER: Resolve Name & Depth ---
-        const resolveSlotInfo = (slot) => {
-            // CASE 1: Player is already in the slot
-            if (slot.entrant) {
-                return { 
-                    text: slot.entrant.name, 
-                    isKnown: true, 
-                    isDeepKnown: true 
-                };
-            }
-
-            // CASE 2: Waiting on a Prerequisite
-            if (slot.prereqId) {
-                const pId = String(slot.prereqId);
-                
-                if (setMap.has(pId)) {
-                    const pSet = setMap.get(pId);
-                    const s1Name = pSet.slots[0]?.entrant?.name;
-                    const s2Name = pSet.slots[1]?.entrant?.name;
-
-                    // CHECK: Do we know the two people from the previous set?
-                    if (s1Name && s2Name) {
-                        const type = slot.prereqPlacement === 1 ? "Winner" : "Loser";
-                        return { 
-                            text: `${type} of ${s1Name} vs ${s2Name}`, 
-                            isKnown: false, // Not a specific player yet
-                            isDeepKnown: true // But we know the matchup
-                        };
-                    }
-                }
-                
-                // Fallback: Prereq exists but names unknown (rare with the new query)
-                const type = slot.prereqPlacement === 1 ? "W" : "L";
-                // Slice ID to prevent massive strings
-                const shortId = slot.prereqId.toString().split('_').pop() || slot.prereqId;
-                return { 
-                    text: `${type}. of Set ${shortId}`, 
-                    isKnown: false, 
-                    isDeepKnown: false 
-                };
-            }
-
-            return { text: "TBD", isKnown: false, isDeepKnown: false };
-        };
-
-        // 2. PROCESS ONLY ACTIVE NODES FOR DISPLAY
-        const cleanData = activeNodes.map(n => {
-          const s1 = resolveSlotInfo(n.slots[0]);
-          const s2 = resolveSlotInfo(n.slots[1]);
-          const poolId = n.phaseGroup?.displayIdentifier || "Bracket";
+        const cleanData = rawNodes.map(n => {
           
+          const resolvePlayer = (slotIndex) => {
+            const slot = n.slots[slotIndex];
+            if (slot.entrant) return slot.entrant.name; 
+
+            if (slot.prereqId && setMap.has(slot.prereqId)) {
+                const prereqSet = setMap.get(slot.prereqId);
+                const p1 = prereqSet.slots[0]?.entrant?.name || "TBD";
+                const p2 = prereqSet.slots[1]?.entrant?.name || "TBD";
+                const type = slot.prereqPlacement === 1 ? "Winner" : "Loser";
+                
+                return `${type} of ${p1} vs ${p2}`;
+            }
+            return "TBD";
+          };
+
+          const p1Name = resolvePlayer(0);
+          const p2Name = resolvePlayer(1);
+          const poolId = n.phaseGroup?.displayIdentifier || "Bracket";
+          const fullRound = `${poolId}: ${n.fullRoundText}`;
+
           return {
             id: n.id,
-            p1: s1.text,
-            p2: s2.text,
-            s1Info: s1,
-            s2Info: s2,
-            round: `${poolId}: ${n.fullRoundText}`,
+            p1: p1Name,
+            p2: p2Name,
+            isP1Known: !!n.slots[0]?.entrant,
+            isP2Known: !!n.slots[1]?.entrant,
+            round: fullRound,
             station: n.station ? String(n.station.number) : null,
             isStream: !!n.stream,
             startedAt: n.startedAt,
@@ -339,16 +277,18 @@ export default function TerminalDashboard({ token, eventId, onBack }) {
 
         setMatches(cleanData);
 
-        // --- FILTER UPCOMING ---
         const upcomingFiltered = cleanData.filter(m => {
-            // Must be Open (1) or Pending (5)
             if (m.status !== 1 && m.status !== 5) return false;
+            
+            // Allow if both known
+            if (m.isP1Known && m.isP2Known) return true;
 
+            // Allow if one known + one Valid Prereq String (not "TBD")
+            // Or both Valid Prereq Strings
+            const p1Valid = m.p1 !== "TBD";
+            const p2Valid = m.p2 !== "TBD";
 
-            // PENDING (State 5): Only show if we have "Deep Knowledge" of both sides
-            // This means we either know the player, OR we know the specific matchup feeding into it
-            if (m.s1Info.isDeepKnown && m.s2Info.isDeepKnown) return true;
-
+            if (p1Valid && p2Valid) return true;
             return false;
         });
 
@@ -367,32 +307,19 @@ export default function TerminalDashboard({ token, eventId, onBack }) {
     const interval = setInterval(fetchData, 30000); 
     const countdown = setInterval(() => { setTimer(prev => prev > 0 ? prev - 1 : 0); }, 1000);
     const flapInterval = setInterval(() => { setFlapTrigger(prev => prev + 1); }, 12000);
-
-    return () => {
-        clearInterval(interval);
-        clearInterval(countdown);
-        clearInterval(flapInterval);
-    };
+    return () => { clearInterval(interval); clearInterval(countdown); clearInterval(flapInterval); };
   }, [fetchData]);
 
-  const handleManualRefresh = () => {
-      setTimer(30);
-      fetchData();
-  };
-
+  const handleManualRefresh = () => { setTimer(30); fetchData(); };
   const playing = matches.filter(m => m.status === 2);
   const called = matches.filter(m => m.status === 6);
 
   // --- RENDERERS ---
 
-  const renderCalledSection = () => (
-    <div className="bg-[--color-navy]/30 p-2 pb-4 border-b-4 border-[--color-gold]">
-        <div className="text-[--color-gold] font-bold text-sm tracking-[0.3em] mb-4 pl-2 border-l-4 border-[--color-gold]">
-          CALLED TO STATION (REPORT)
-        </div>
-        <div className="flex flex-col gap-2">
+  // 1. CALLED ITEMS (SCROLLABLE LOGIC)
+  const renderCalledItems = () => (
+    <div className="flex flex-col gap-2">
         {called.map((match) => {
-          // --- PURPLE LOGIC FOR CALLED ---
           const colorClass = match.isStream ? "text-purple-400" : "text-[--color-gold]";
           const labelClass = match.isStream ? "text-purple-400" : "text-[--color-gold]";
 
@@ -412,20 +339,19 @@ export default function TerminalDashboard({ token, eventId, onBack }) {
                     <span className="text-[--color-gold] text-sm">VS</span>
                     <span>{match.p2}</span>
                     </div>
-                    <div className="text-sm text-[--color-gold] uppercase">Pool {match.round}</div>
+                    <div className="text-sm text-[--color-gold] uppercase">{match.round}</div>
                 </div>
                 <div className="text-right flex flex-col items-end gap-1">
                     <span className="text-[--color-gold] border border-[--color-gold] px-3 py-1 text-sm font-bold animate-pulse bg-black">CALLED</span>
-                    {/* ADDED TIMER TO CALLED */}
                     <MatchTimer startedAt={match.startedAt} />
                 </div>
             </div>
           );
         })}
-        </div>
     </div>
   );
 
+  // 2. PLAYING ITEMS
   const renderPlayingItems = () => (
       <div className="flex flex-col gap-2">
         {playing.map((match) => {
@@ -442,10 +368,10 @@ export default function TerminalDashboard({ token, eventId, onBack }) {
                         </span>
                     </div>
                     <div className="flex flex-col overflow-hidden">
-                        <SplitFlapText text={match.p1.substring(0, 60)} className="text-lg text-gray-200 truncate" trigger={flapTrigger} />
+                        <SplitFlapText text={match.p1.substring(0, 20)} className="text-lg text-gray-200 truncate" trigger={flapTrigger} />
                         <span className="text-[10px] text-[--color-sky] mt-1 mb-1">VS</span>
-                        <SplitFlapText text={match.p2.substring(0, 60)} className="text-lg text-gray-200 truncate" trigger={flapTrigger} />
-                        <span className="text-[10px] text-gray-500 uppercase mt-1 truncate">Pool {match.round}</span>
+                        <SplitFlapText text={match.p2.substring(0, 20)} className="text-lg text-gray-200 truncate" trigger={flapTrigger} />
+                        <span className="text-[10px] text-gray-500 uppercase mt-1 truncate">{match.round}</span>
                     </div>
                     <div className="text-right flex flex-col items-end gap-1">
                         <span className={`font-bold text-xs tracking-wider ${colorClass}`}>ACTIVE</span>
@@ -457,7 +383,7 @@ export default function TerminalDashboard({ token, eventId, onBack }) {
       </div>
   );
 
- const renderUpcomingContent = () => (
+  const renderUpcomingContent = () => (
     <div className="flex flex-col">
        {upcomingMatches.map((match, idx) => (
           <div key={`${match.id}-${idx}`} className="flex justify-between items-center p-3 border-b border-[--color-navy]/50">
@@ -466,41 +392,32 @@ export default function TerminalDashboard({ token, eventId, onBack }) {
                 #{idx + 1}
               </span>
               <div className="flex flex-col overflow-hidden w-full">
-                <div className="flex flex-col leading-tight mb-1">
-                  {/* PLAYER 1 NAME */}
-                  <span className={`truncate ${
-                      match.s1Info.isKnown 
-                        ? "text-white font-bold text-md" // Real Player Style
-                        : "text-gray-500 text-md font-bold font-mono uppercase tracking-wider" // "Winner of..." Style
-                    }`}>
+                <div className="flex flex-wrap items-baseline gap-x-2 leading-tight mb-1">
+                  <span className={`text-white font-bold text-md ${match.isP1Known ? "" : "text-gray-500 italic"}`}>
                     {match.p1}
                   </span>
-                  
-                  <span className="text-[--color-gold] text-[10px] font-mono opacity-50 my-0.5 ml-1">VS</span> 
-
-                  {/* PLAYER 2 NAME */}
-                  <span className={`truncate ${
-                      match.s2Info.isKnown 
-                        ? "text-white font-bold text-md" 
-                        : "text-gray-500 text-md font-bold font-mono uppercase tracking-wider"
-                    }`}>
+                  <span className="text-[--color-gold] text-xs font-mono">vs</span> 
+                  <span className={`text-white font-bold text-md ${match.isP2Known ? "" : "text-gray-500 italic"}`}>
                     {match.p2}
                   </span>
                 </div>
-                <span className="text-[10px] text-[--color-sky] font-mono tracking-wider opacity-80">
-                    Pool {match.round}
-                </span>
+                <span className="text-xs text-gray-400 font-mono tracking-wider">{match.round}</span>
               </div>
             </div>
           </div>
         ))}
     </div>
   );
+
+  // SCROLL THRESHOLDS
+  const shouldScrollCalled = called.length > 2; // Auto-scroll if > 2 called matches
+  const durationCalled = `${Math.max(20, called.length * 6)}s`;
+
   const shouldScrollPlaying = playing.length > 2;
   const durationPlaying = `${Math.max(20, playing.length * 5)}s`; 
-  const shouldScrollUpcoming = upcomingMatches.length > 3;
+  
+  const shouldScrollUpcoming = upcomingMatches.length > 5;
   const durationUpcoming = `${Math.max(20, upcomingMatches.length * 4)}s`;
-
 
   if (isEditingMap) {
     return <MapEditor initialConfig={mapConfig} onSave={handleSaveMap} onCancel={() => setIsEditingMap(false)} />;
@@ -545,7 +462,28 @@ export default function TerminalDashboard({ token, eventId, onBack }) {
             <div className="h-[2px] bg-[--color-navy] flex-1"></div>
           </div>
           <div className="flex-1 min-h-0 flex flex-col border-2 border-[--color-navy] bg-black/50 overflow-hidden relative">
-            {called.length > 0 && (<div className="flex-none w-full z-20 max-h-[50%] overflow-y-auto no-scrollbar shadow-[0_10px_20px_rgba(0,0,0,0.5)]">{renderCalledSection()}</div>)}
+            
+            {/* 1. CALLED SECTION (UPDATED FOR SCROLL) */}
+            {called.length > 0 && (
+              <div className="flex-none w-full z-20 max-h-[45%] flex flex-col bg-[#050510] border-b-4 border-[--color-gold] shadow-xl">
+                 <div className="flex-none p-2 pb-1">
+                    <div className="text-[--color-gold] font-bold text-sm tracking-[0.3em] pl-2 border-l-4 border-[--color-gold]">
+                        CALLED TO STATION (REPORT)
+                    </div>
+                 </div>
+                 <div className="flex-1 min-h-0 relative overflow-hidden">
+                    {shouldScrollCalled ? (
+                        <div className="animate-scroll-vertical hover:[animation-play-state:paused]" style={{ animationDuration: durationCalled, animationName: 'scrollUp' }}>
+                            {renderCalledItems()}{renderCalledItems()}
+                        </div>
+                    ) : (
+                        <div className="h-full overflow-y-auto no-scrollbar">{renderCalledItems()}</div>
+                    )}
+                 </div>
+              </div>
+            )}
+
+            {/* 2. PLAYING SECTION */}
             <div className="flex-1 min-h-0 flex flex-col relative overflow-hidden">
                <div className="flex-none p-2 z-10 bg-[#050510]/95 border-b border-[--color-navy]">
                    <div className="text-red-500 font-bold text-sm tracking-[0.3em] pl-2 border-l-4 border-red-600">ENGAGED / IN-PROGRESS</div>
