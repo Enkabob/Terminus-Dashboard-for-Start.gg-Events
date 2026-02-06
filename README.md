@@ -42,7 +42,7 @@ Only follow these steps if you want to modify the code or build the app yourself
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/Enkabob/the-terminal.git
+git clone https://github.com/Enkabob/Terminus-Dashboard-for-Start.gg-Events.git
 cd Terminus-Dashboard-for-Start.gg-Events
 ```
 
@@ -85,3 +85,4 @@ To prevent the dashboard from getting cluttered with "TBD vs TBD" matches, this 
 MIT License. Hack away.
 
 ```
+
